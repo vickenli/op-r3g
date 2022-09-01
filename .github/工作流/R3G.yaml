@@ -1,0 +1,116 @@
+名称：为小米路由器3G构建OpenWRT-full
+
+在：
+  发布：
+    类型： 已发布
+  推送：
+    分行：
+      - 主要
+    路径：
+      - 'r3g.config'
+  时间表：
+    - cron： 0 16 * * *
+
+环境：
+  REPO_URL： https://github.com/coolsnowwolf/lede
+  REPO_BRANCH：主人
+  CONFIG_FILE： r3g.config
+  DIY_SH： diy.sh
+  UPLOAD_FIRMWARE：真
+  UPLOAD_COWTRANSFER：真
+  SSH_ACTION：假
+  用户名： MI_R3G
+
+招聘职位：
+  构建：
+    run-on： ubuntu-latest
+    如果： github.event.repository.owner.id == github.event.sender.id
+
+    步骤：
+    - 名称： 结帐
+      用途：动作/checkout@master
+
+    - 名称：初始化环境
+      环境：
+        DEBIAN_FRONTEND：非交互式
+      运行： |
+sudo -E apt-get -qq update
+sudo -E apt-get -qq 升级
+sudo -E apt-get -qq install build-essential \
+asciidoc binutils bzip2 gawk gettext git libncurses5-dev libz-dev \
+patch python3 unzip zlib1g-dev lib32gcc1 libc6-dev-i386 subversion \
+flex uglifyjs gcc-multilib g++-multilib p7zip p7zip-full msmtp libssl-dev \
+texinfo libglib2.0-dev xmlto qemu-utils upx libelf-dev autoconf automake \
+libtool autopoint device-tree-compiler antlr3 gperf swig
+sudo -E apt-get -qq autoremove --purge
+sudo -E apt-get -qq clean
+sudo timedatectl set-timezone “Asia/Shanghai”
+    - 名称：克隆源代码
+      运行： |
+git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
+cd openwrt/package/lean/
+git 克隆 --深度 1 https://github.com/rufengsuixing/luci-app-adguardhome
+git 克隆 --深度 1 https://github.com/vernesong/OpenClash
+git 克隆 --深度 1 https://github.com/jerrykuku/lua-maxminddb
+git 克隆 --深度 1 https://github.com/jerrykuku/luci-app-vssr
+    - 名称：更新和安装源
+      运行： |
+cp -f feeds.conf.default openwrt/
+cd openwrt
+./scripts/feeds update -a
+./scripts/feeds install -a
+    - 名称：加载自定义配置
+      运行： |
+cp -f $CONFIG_FILE openwrt/.config
+cp -f $DIY_SH openwrt/diy.sh
+cd openwrt
+chmod +x diy.sh
+sh diy.sh
+    - 名称：设置 tmate 会话
+      用途：麦克施密特/动作tmate@v3
+      如果：env.SSH_ACTION == '真'
+      与：
+        限制对参与者的访问：真
+
+    - 名称：下载包
+      运行： |
+cd openwrt
+进行定义配置
+制作下载 -j8
+find dl -size -1024c -exec ls -l {} \;
+find dl -size -1024c -exec rm -f {} \;
+    - 名称：编译固件
+      id： 编译
+      运行： |
+cd openwrt
+        echo -e "$(nproc) thread compile"
+        make -j$(nproc) || make -j1 V=s
+        echo "::set-output name=status::success"
+    - name: Organize files
+      id: organize
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_FIRMWARE == 'true' && !cancelled()
+      运行： |
+cd openwrt/bin/targets/*/*
+rm -rf package
+rm -f version.buildinfo feeds.buildinfo sha256sums \
+*-squashfs-rootfs0.bin *-squashfs-kernel1.bin \
+*.清单
+md5sum config.buildinfo >> md5.txt
+md5sum *-initramfs-kernel.bin >> md5.txt
+md5sum *-squashfs-sysupgrade.bin >> md5.txt
+回显 “FIRMWARE=$PWD” >> $GITHUB_ENV
+echo “：：set-output name=status：：success”
+    - 名称：上传固件目录
+      用途：操作/上载artifact@master
+      if： steps.organize.outputs.status == 'success' && ！cancelled（）
+      与：
+        名称： OpenWrt-full_MI-R3G
+        path： ${{ env.固件 }}
+
+    - 名称：将固件上传到奶牛转移
+      if： steps.organize.outputs.status == 'success' && env.UPLOAD_COWTRANSFER == 'true' && ！cancelled（）
+      运行： |
+cd ${固件}
+zip -r OpenWrt-full_$TNAME.zip *
+卷曲-sL https://git.io/cowtransfer |sh
+./cowtransfer-uploader -s -p 8 OpenWrt-full_$TNAME.zip
